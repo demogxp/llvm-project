@@ -992,6 +992,9 @@ features cannot lower the translation-unit ABI level;
 
 #### Arm and AArch64 Support
 
+- Assembler/disassembler support has been added for Armv9.8-A (2026)
+  architecture extensions.
+
 - Added support for pointer authentication discrimination of C++ virtual table
   pointers stored in VTTs via the `-fptrauth-vtt-vtable-pointer-discrimination`
   option.

@@ -249,6 +249,9 @@ Makes programs 10x faster by doing Special New Thing.
   attribute perform a load from the return address before returning, reducing the
   cache side channel used to guess pointer authentication codes.
 
+* Assembler/disassembler support has been added for Armv9.8-A (2026)
+  architecture extensions.
+
 ### Changes to the AMDGPU Backend
 
 * Replaced `xnack` and `sramecc` target features with `amdgpu.xnack`
