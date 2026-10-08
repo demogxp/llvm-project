@@ -12,6 +12,8 @@
 
 #include "llvm/Frontend/OpenMP/OMPDescriptors.h"
 
+#include <map>
+
 #define Unassociated None
 
 namespace llvm::omp {
@@ -157,7 +159,7 @@ const descriptor::Directive &getDescriptor(Directive D) {
   if (Leafs.size() == 1)
     return getDirectiveMap().at(Leafs[0]);
 
-  static DenseMap<Directive, descriptor::Directive> Compound;
+  static std::map<Directive, descriptor::Directive> Compound;
   if (auto F = Compound.find(D); F != Compound.end())
     return F->second;
 
@@ -166,13 +168,16 @@ const descriptor::Directive &getDescriptor(Directive D) {
   using Details = descriptor::details::Directive;
   using DetailsMap = descriptor::DetailsMap<Details>;
   DetailsMap Det;
+  // The name of the descriptor will be the spelling from the latest supported
+  // version.
   llvm::omp::Version MaxV(0);
 
   for (llvm::omp::Directive L : Leafs) {
     const auto &Desc{getDescriptor(L)};
     for (auto &[V, T] : Desc.getDetails()) {
-      MaxV = std::max(MaxV, V);
+      MaxV = std::max(MaxV, V); // Used for descriptor's name.
       auto F = Det.insert({V, Details{}}).first;
+      F->second.Props |= T.Props;
       F->second.Spelling = getOpenMPDirectiveName(D, V);
       // The category should be the same for all of them (i.e. executable),
       // the association of the last one is the association of the whole
