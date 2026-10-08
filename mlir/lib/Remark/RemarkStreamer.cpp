@@ -1,4 +1,5 @@
 #include "mlir/Remark/RemarkStreamer.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Remarks.h"
 
@@ -9,22 +10,21 @@
 #include "llvm/Support/ToolOutputFile.h"
 
 namespace mlir::remark::detail {
-
-FailureOr<std::unique_ptr<MLIRRemarkStreamerBase>>
+llvm::Expected<std::unique_ptr<MLIRRemarkStreamerBase>>
 LLVMRemarkStreamer::createToFile(llvm::StringRef path,
                                  llvm::remarks::Format fmt) {
+  // Same flags as llvm::setupLLVMOptimizationRemarks: only YAML is text.
+  auto flags = fmt == llvm::remarks::Format::YAML
+                   ? llvm::sys::fs::OF_TextWithCRLF
+                   : llvm::sys::fs::OF_None;
   std::error_code ec;
-  // Use error_code ctor; YAML is text. (Bitstream also works fine here.)
-  auto f =
-      std::make_unique<llvm::ToolOutputFile>(path, ec, llvm::sys::fs::OF_Text);
+  auto f = std::make_unique<llvm::ToolOutputFile>(path, ec, flags);
   if (ec)
-    return failure();
+    return llvm::errorCodeToError(ec);
 
   auto serOr = llvm::remarks::createRemarkSerializer(fmt, f->os());
-  if (!serOr) {
-    llvm::consumeError(serOr.takeError());
-    return failure();
-  }
+  if (!serOr)
+    return serOr.takeError();
 
   auto rs =
       std::make_unique<llvm::remarks::RemarkStreamer>(std::move(*serOr), path);
@@ -63,10 +63,14 @@ LogicalResult enableOptimizationRemarksWithLLVMStreamer(
     std::unique_ptr<detail::RemarkEmittingPolicyBase> remarkEmittingPolicy,
     const RemarkCategories &cat, bool printAsEmitRemarks) {
 
-  FailureOr<std::unique_ptr<detail::MLIRRemarkStreamerBase>> sOr =
+  llvm::Expected<std::unique_ptr<detail::MLIRRemarkStreamerBase>> sOr =
       detail::LLVMRemarkStreamer::createToFile(path, fmt);
-  if (failed(sOr))
+  if (!sOr) {
+    emitError(UnknownLoc::get(&ctx))
+        << "cannot initialize remark output '" << path
+        << "': " << llvm::toString(sOr.takeError());
     return failure();
+  }
 
   return remark::enableOptimizationRemarks(ctx, std::move(*sOr),
                                            std::move(remarkEmittingPolicy), cat,

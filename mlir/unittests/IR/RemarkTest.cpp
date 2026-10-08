@@ -13,11 +13,13 @@
 #include "mlir/IR/Remarks.h"
 #include "mlir/Remark/RemarkStreamer.h"
 #include "mlir/Support/TypeID.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/Remarks/RemarkFormat.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/YAMLParser.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -793,4 +795,47 @@ TEST(Remark, TestRemarkLinking) {
   EXPECT_THAT(errOut, HasSubstr("vectorized loop"));
 }
 
+TEST(Remark, TestLLVMStreamerErrors) {
+  llvm::SmallString<64> dir;
+  ASSERT_FALSE(llvm::sys::fs::createUniqueDirectory("remarks", dir));
+  llvm::scope_exit removeDir([&] { llvm::sys::fs::remove_directories(dir); });
+  llvm::SmallString<64> missingPath(dir);
+  llvm::sys::path::append(missingPath, "missing", "out.yaml");
+  llvm::SmallString<64> filePath(dir);
+  llvm::sys::path::append(filePath, "out.yaml");
+  std::string noSuchFile =
+      std::make_error_code(std::errc::no_such_file_or_directory).message();
+
+  // A file that cannot be opened.
+  auto missing = remark::detail::LLVMRemarkStreamer::createToFile(
+      missingPath, llvm::remarks::Format::YAML);
+  ASSERT_FALSE(static_cast<bool>(missing));
+  EXPECT_EQ(llvm::toString(missing.takeError()), noSuchFile);
+
+  // A serializer that cannot be created: its error is forwarded and the file
+  // is not left behind.
+  auto badFormat = remark::detail::LLVMRemarkStreamer::createToFile(
+      filePath, llvm::remarks::Format::Unknown);
+  ASSERT_FALSE(static_cast<bool>(badFormat));
+  EXPECT_EQ(llvm::errorToErrorCode(badFormat.takeError()),
+            std::errc::invalid_argument);
+  EXPECT_FALSE(llvm::sys::fs::exists(filePath));
+
+  // Through the enable function the error is emitted on the context.
+  MLIRContext context;
+  std::string diagnostic;
+  ScopedDiagnosticHandler handler(&context, [&](Diagnostic &diag) {
+    diagnostic = diag.str();
+    return success();
+  });
+  mlir::remark::RemarkCategories cats{/*all=*/"", /*passed=*/"cat",
+                                      /*missed=*/std::nullopt,
+                                      /*analysis=*/std::nullopt,
+                                      /*failed=*/std::nullopt};
+  EXPECT_TRUE(failed(mlir::remark::enableOptimizationRemarksWithLLVMStreamer(
+      context, missingPath, llvm::remarks::Format::YAML,
+      std::make_unique<remark::RemarkEmittingPolicyAll>(), cats)));
+  EXPECT_EQ(diagnostic, "cannot initialize remark output '" +
+                            missingPath.str().str() + "': " + noSuchFile);
+}
 } // namespace
